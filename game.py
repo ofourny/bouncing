@@ -3,118 +3,196 @@ import sys
 import math
 import pygame.gfxdraw
 import mido
+from mido import MidiFile, Message, MidiTrack
 import random
 import pygame.midi
 from pydub import AudioSegment
 import time
 import threading
 
+# Initialize Pygame modules
 pygame.midi.init()
-
-# Get the default MIDI output ID
-output_id = pygame.midi.get_default_output_id()
-
-# Open the default MIDI output
-midi_output = pygame.midi.Output(1)
-
-# Initialize Pygame
 pygame.init()
+pygame.font.init()
 
-# Screen dimensions
+# Screen dimensions and settings
 screen_width, screen_height = 1920, 1080
 screen = pygame.display.set_mode((screen_width, screen_height))
 
-# Path to your MIDI file
-midi_path = 'ball7.mid'
-
-# Load the MIDI file
+# MIDI settings and file path
+midi_path = 'ball8_3.mid'
 midi_file = mido.MidiFile(midi_path, clip=True)
+output_id = pygame.midi.get_default_output_id()  # Get the default MIDI output ID
 
-# Cap the ball's speed to prevent it from becoming too fast
-gravity = 5.6  # Adjust the gravity effect here
-bounce_factor = 1.1  # Bounce factor; values >1 will make the ball bounce higher
-bounce_count = 0
-decrement_speed = 20
-general_opacity = 4
-max_bounce_factor = 30
+# Dictionary to keep track of the current instrument for each channel
+current_instruments = {i: None for i in range(16)}  # MIDI channels 0-15
 
-# Constants
-initial_damping = 1.6  # Initial growth factor, starting high
-damping_decrease = 0.9  # Factor by which the damping decreases each time
-minimum_damping = 1.02  # Minimum damping factor to prevent growth from stopping entirely
-damping_decay_rate = 0.1
+outport = mido.open_output(mido.get_output_names()[0])  # Open a MIDI output port with mido
 
-# Initialize the damping variable at the start of the game
-damping_factor = initial_damping
+# Audio settings
+freq = 192000  # Audio CD quality
+bitsize = -16  # Unsigned 16 bit
+channels = 2  # 1 is mono, 2 is stereo
+buffer = 1024  # Number of samples
+pygame.mixer.init(freq, bitsize, channels, buffer)
+pygame.mixer.music.set_volume(0.6)
 
+# Create channels for multiple sound effects
+channel1 = pygame.mixer.Channel(0)
+channel2 = pygame.mixer.Channel(1)
+channel3 = pygame.mixer.Channel(2)
+channel4 = pygame.mixer.Channel(3)
 
-# Circle's center and radius for boundary collision
-circle_center_x, circle_center_y = screen_width / 2, screen_height / 2
-circle_center = [circle_center_x, circle_center_y]
-
-pygame.font.init()  # Don't forget to initialize the font module
-pygame.mixer.init()
-debug_font = pygame.font.SysFont('Comic Sans Ms', 24)
-
-# Keep track of the current note index
-current_note_index = 0
-
-# Initialize Pygame Mixer
-pygame.mixer.init()
-
-channel1 = pygame.mixer.Channel(0)  # Create a Channel on index 0
-channel2 = pygame.mixer.Channel(1)  # Create another Channel on index 1
-channel3 = pygame.mixer.Channel(2)  # Create another Channel on index 1
-channel4 = pygame.mixer.Channel(3)  # Create another Channel on index 1
-
+# Load sounds
 sound1 = pygame.mixer.Sound('ball6_1.mp3')
 sound2 = pygame.mixer.Sound('ball6_1.mp3')
 sound3 = pygame.mixer.Sound('ball6_1.mp3')
 sound4 = pygame.mixer.Sound('ball6_1.mp3')
 
-# Colors
+# Game physics and gameplay settings
+gravity = 9  # Adjust the gravity effect here
+bounce_factor = 100  # Bounce factor; values >1 will make the ball bounce higher
+bounce_count = 0
+current_note_index = 0
+decrement_speed = 20
+general_opacity = 230
+collision_cooldown = 0
+acceleration_factor = 1.2
+max_acceleration_factor = 3
+ball_size_small = 49
+ball_size = 10
+
+# Damping settings
+initial_damping = 1.6  # Initial growth factor, starting high
+damping_decrease = 0.9  # Factor by which the damping decreases each time
+minimum_damping = 1.02  # Minimum damping factor to prevent growth from stopping entirely
+damping_decay_rate = 0.1
+damping_factor = initial_damping  # Initialize the damping variable at the start of the game
+
+# Circle settings for graphics and collision
+circle_center_x, circle_center_y = screen_width / 2, screen_height / 2
+circle_center = [circle_center_x, circle_center_y]
+circle_radius = 250
+circle_thickness = 10
+outer_circle_radius_increment = 0
+
+# Color and drawing settings
 black = (0, 0, 0)
 rainbow_colors = [(255, 0, 0), (255, 127, 0), (255, 255, 0), (0, 255, 0), (0, 0, 255), (75, 0, 130), (148, 0, 211)]
 segment_angle = 360 / len(rainbow_colors)
 current_color_index = 0
 circle_color = rainbow_colors[current_color_index]
-
 color_change_duration = 1.0  # Duration in seconds to complete a color transition
 color_change_timer = 0.0  # Timer to track the color transition progress
 next_color_index = (current_color_index + 1) % len(rainbow_colors)
 interpolation_factor = 0.0  # Factor to interpolate between current and next color
 
-# Initialize the cooldown timer
-collision_cooldown = 0
-acceleration_factor = 1.2
-max_acceleration_factor = 3
+# Font settings for text display
+debug_font = pygame.font.SysFont('Comic Sans Ms', 16)
+debug_font2 = pygame.font.SysFont('Comic Sans Ms', 24)
+# Fullscreen setting
+FullScreen = True  # Variable to keep track of fullscreen status
 
-# Colors
-black = (0, 0, 0)
-rainbow_colors = [(255, 0, 0), (255, 127, 0), (255, 255, 0), (0, 255, 0), (0, 0, 255), (75, 0, 130), (148, 0, 211)]
-segment_angle = 360 / len(rainbow_colors)
+# Clock for controlling frame rate
+clock = pygame.time.Clock()
 
-circle_radius = 250
-circle_thickness = 10
-outer_circle_radius_increment = 0
+# System management and event tracking
+done = 0
+done2 = 0
+ftime = 0
+dtcount = 0
+cpt = 0
 
-def update_damping():
-    global damping_factor
-    if damping_factor > minimum_damping:
-        damping_factor *= (1 - damping_decay_rate)
-        damping_factor = max(damping_factor, minimum_damping)
+# Ball settings
+balls = [
+    {'pos': [circle_center_x+10, circle_center_y], 'speed': [50, 800], 'size': ball_size, 'color': (0, 255, 0)},  # Green ball
+]
 
+
+# Global variable to store rainbow balls
+rainbow_balls = []
+lines = []
+trail_positions = [[] for _ in balls]
+
+# Assuming a BPM that you might want to dynamically adjust according to your MIDI file
+bpm = 130  # Default BPM, but consider extracting this from the MIDI file if it varies
+ticks_per_beat = midi_file.ticks_per_beat
+print(ticks_per_beat)
+current_midi_tick = 0  # This will track where in the MIDI file we are
+seconds_per_tick = 60.0 / (bpm * ticks_per_beat)
+
+ticks_per_second = ticks_per_beat * (bpm / 60)
+segment_length_ticks = int(ticks_per_second)
+
+last_play_time = 0
+
+def ensure_color_values(color):
+    """Ensure all color components are within the 0-255 range, increasing brightness."""
+    return tuple(min(255, int(c + 0.2 * (255 - c))) for c in color)  # Increase color brightness
+
+def apply_glow_effect(surface, position, color, radius):
+    """Apply a glow effect by drawing multiple concentric circles with increasing alpha."""
+    glow_intensity = 10  # Number of layers
+    for i in range(glow_intensity):
+        alpha = int(120 * (1 - i / glow_intensity))  # Decrease alpha gradually
+        glow_color = (*color, alpha)  # Create RGBA from RGB
+        temp_surface = pygame.Surface((2 * radius, 2 * radius), pygame.SRCALPHA)
+        pygame.draw.circle(temp_surface, glow_color, (radius, radius), radius - i * (radius / glow_intensity))
+        surface.blit(temp_surface, (position[0] - radius, position[1] - radius), special_flags=pygame.BLEND_RGBA_ADD)
+
+
+def update_instruments():
+    for track in midi_file.tracks:
+        for msg in track:
+            if msg.type == 'program_change':
+                current_instruments[msg.channel] = msg.program
+
+# Helper functions for color manipulation
+def lighten_color(color, amount=0.5):
+    """Lightens the given color by multiplying (1-luminosity) by the given amount."""
+    return tuple(min(255, int(c + (255 - c) * amount)) for c in color)
+
+
+def darken_color(color, amount=0.5):
+    """Darkens the given color by multiplying (1-luminosity) by the given amount."""
+    return tuple(max(0, int(c * (1 - amount))) for c in color)
+
+
+def fade_to_white(color, fade_factor):
+    """Gradually fades the given color towards white by the fade factor."""
+    new_color = [min(255, int(c + fade_factor * (255 - c))) for c in color]
+    return tuple(new_color)
+
+
+def fade_to_black(color, fade_factor):
+    """Gradually fades the given color towards black by the fade factor."""
+    new_color = [max(0, int(c * (1 - fade_factor))) for c in color]
+    return tuple(new_color)
+
+
+def interpolate_color(color_start, color_end, factor):
+    """Interpolate between two colors by a factor between 0 and 1."""
+    red = round(color_start[0] + (color_end[0] - color_start[0]) * factor)
+    green = round(color_start[1] + (color_end[1] - color_start[1]) * factor)
+    blue = round(color_start[2] + (color_end[2] - color_start[2]) * factor)
+    return (int(min(255, max(0, red))), int(min(255, max(0, green))), int(min(255, max(0, blue))))
+
+def shift_colors(rainbow_colors, shift_factor):
+    """Shift all colors in the rainbow_colors list towards the next color."""
+    new_colors = []
+    for i in range(len(rainbow_colors)):
+        current_color = rainbow_colors[i]
+        next_color = rainbow_colors[(i + 1) % len(rainbow_colors)]
+        interpolated_color = interpolate_color(current_color, next_color, shift_factor)
+        new_colors.append(interpolated_color)
+    return new_colors
+
+# Function to play background audio
 def play_audio(index, file_path):
     try:
-
-        if(index == 0):
-            channel1.play(sound1)
-        if(index == 1):
-            channel2.play(sound2)
-        if(index == 2):
-            channel3.play(sound3)
-        if(index == 3):
-            channel4.play(sound4)
+        channel = [channel1, channel2, channel3, channel4][index]
+        sound = [sound1, sound2, sound3, sound4][index]
+        channel.play(sound)
 
         # Keep the program running until the music stops
         while pygame.mixer.music.get_busy():
@@ -122,240 +200,207 @@ def play_audio(index, file_path):
     except Exception as e:
         print(f"Error occurred: {e}")
 
+
 def background_audio_player(index, file_path):
     """Function to play audio in the background."""
-    thread = threading.Thread(target=play_audio, args=(index,file_path,))
+    thread = threading.Thread(target=play_audio, args=(index, file_path,))
     thread.start()
 
 
-# Create an RGBA color by adding the alpha value to the existing RGB color
-def ensure_color_values(color):
-    return tuple(min(255, max(0, int(c))) for c in color)
-
-# Global variable to store rainbow balls
-rainbow_balls = []
-
-def spawn_rainbow_balls():
-    global rainbow_balls
-    colors = [
-        (255, 0, 0),  # Bright Red
-        (255, 165, 0),  # Orange
-        (255, 255, 0),  # Bright Yellow
-        (0, 255, 0),  # Neon Green
-        (0, 255, 255),  # Aqua
-        (0, 127, 255),  # Bright Sky Blue
-        (255, 0, 255),  # Magenta
-        (255, 105, 180),  # Hot Pink
-        (127, 255, 0),  # Chartreuse Green
-        (255, 20, 147)  # Deep Pink
-    ]
-
-    start_x, start_y = circle_center_x, circle_center_y
-    for i, color in enumerate(colors):
-        angle = i * (360 / len(colors))
-        speed_x = 20 * math.cos(math.radians(angle))
-        speed_y = 20 * math.sin(math.radians(angle))
-        rainbow_balls.append({'pos': [start_x, start_y], 'speed': [speed_x, speed_y], 'size': ball_size_small, 'color': color})
-
-freq = 192000    # audio CD quality
-bitsize = -16   # unsigned 16 bit
-channels = 2    # 1 is mono, 2 is stereo
-buffer = 1024    # number of samples
-pygame.mixer.init(freq, bitsize, channels, buffer)
-
-# optional volume 0 to 1.0
-pygame.mixer.music.set_volume(0.6)
-
-trail_max_position = 1000
-
-def fade_to_white(color, fade_factor):
-    """ Gradually fades the given color towards white by the fade factor. """
-    new_color = [min(255, int(c + fade_factor * (255 - c))) for c in color]
-    return tuple(new_color)
-
-def fade_to_black(color, fade_factor):
-    """ Gradually fades the given color towards black by the fade factor. """
-    new_color = [max(0, int(c * (1 - fade_factor))) for c in color]
-    return tuple(new_color)
+# Function to update damping factor
+def update_damping():
+    global damping_factor
+    if damping_factor > minimum_damping:
+        damping_factor *= (1 - damping_decay_rate)
+        damping_factor = max(damping_factor, minimum_damping)
 
 
-cpt = 1
+def safe_draw_circle(screen, color, pos_x, pos_y, radius):
+    # Ensure the x and y positions are within the screen boundaries
+    pos_x = int(max(0, min(screen.get_width(), pos_x)))
+    pos_y = int(max(0, min(screen.get_height(), pos_y)))
+
+    # Ensure the radius is non-negative and within a reasonable size
+    radius = int(max(1, min(screen.get_height() // 2, radius)))  # Avoid overly large or negative radii
+
+    # Use pygame's gfxdraw to draw the circle with the adjusted parameters
+    pygame.gfxdraw.filled_circle(screen, pos_x, pos_y, radius, color)
+
+
 def update_ball(index, ball, dt):
-    global bounce_count, cpt, current_note_index, bounce_factor, acceleration_factor, max_bounce_factor, color_change_timer, next_color_index, outer_circle_radius_increment, general_opacity, current_color_index, circle_color, trail_positions, trail_max_position
+    global rainbow_colors, current_midi_tick, segment_length_ticks, outport, midi_file, bpm, ball_size, bounce_count, cpt, current_note_index, bounce_factor, acceleration_factor, max_bounce_factor, color_change_timer, next_color_index, outer_circle_radius_increment, general_opacity, current_color_index, circle_color, trail_positions, trail_max_position
     max_speed = 500  # Maximum speed limit for any ball
+    increase_factor = 1.05  # Factor by which the ball size increases
+    max_ball_size = 100  # Maximum size of the ball
+    angle_variation_range = 10  # Degrees of random angle variation on bounce
 
-    """ Update the position and speed of a ball based on gravity and boundary collisions. """
-    next_x = ball['pos'][0] + ball['speed'][0] * dt
-    next_y = ball['pos'][1] + ball['speed'][1] * dt
+    ball_radius = ball['size'] / 2
+    ball['speed'][1] += gravity # Adjust gravity strength here
 
-    # Calculate distance from the center of the circle
-    dx, dy = next_x - circle_center_x, next_y - circle_center_y
+
+    # Calculate distance from the center of the circle to the new position
+    dx = ball['pos'][0] - circle_center_x
+    dy = ball['pos'][1] - circle_center_y
     distance = math.sqrt(dx**2 + dy**2)
 
-    if (ball['size'] != ball_size_small):
-        if index < len(trail_positions):
-            trail_positions[index].insert(0, (ball['pos'][0], ball['pos'][1], ball['color'], ball['size'] / 2))
-
-        if len(trail_positions[index]) > 20:
-            trail_positions[index].pop()
-
-    # Check collision with the circle's boundary
-    if distance + ball['size'] / 2 >= circle_radius:
-        # Calculate normal vector from the circle center to the ball center
+    # Calculate normal vector from the circle center to the ball center
+    if distance != 0:
         nx, ny = dx / distance, dy / distance
-        # Reflect the ball's velocity and apply the bounce factor
+    else:
+        nx, ny = 0, 0
+
+    adjusted_collision_radius = circle_radius - circle_thickness - ball_radius
+
+    rainbow_colors = shift_colors(rainbow_colors, 0.05)
+
+    # Inside the game loop, after processing events and before rendering
+    ball['pos'][0] += ball['speed'][0] * dt
+    ball['pos'][1] += ball['speed'][1] * dt
+
+    # Check for collision with the boundary of the circle
+    if distance + ball['size'] / 2 > adjusted_collision_radius:
+
+        # Update the color change timer and interpolation factor
+#        color_change_timer += dt * 10
+#        if color_change_timer >= color_change_duration:
+#            color_change_timer -= color_change_duration
+#            current_color_index = next_color_index
+#            next_color_index = (current_color_index + 1) % len(rainbow_colors)
+#        interpolation_factor = color_change_timer / color_change_duration
+
+        # Calculate the current color
+        current_color = rainbow_colors[current_color_index]
+        next_color = rainbow_colors[next_color_index]
+        circle_color = interpolate_color(current_color, next_color, interpolation_factor)
+
+        circle_color = ensure_color_values(circle_color + (general_opacity,))
+
         dot = ball['speed'][0] * nx + ball['speed'][1] * ny
-        ball['speed'][0] = (ball['speed'][0] - 2 * dot * nx) * bounce_factor
-        ball['speed'][1] = (ball['speed'][1] - 2 * dot * ny) * bounce_factor
+        ball['speed'][0] -= 2 * dot * nx
+        ball['speed'][1] -= 2 * dot * ny
 
-        ball['color'] = fade_to_black(ball['color'], 0.1)  # Adjust fade factor as needed
+        ball['pos'][0] *= bounce_factor
+        ball['pos'][1] *= bounce_factor - gravity
 
-        if(ball['size'] != ball_size_small):
-            # Fade color to white upon bounce
+        # Ensure ball is placed just outside the circle considering its radius
+        overlap = (distance + ball_radius) - (circle_radius - circle_thickness)
+        ball['pos'][0] -= overlap * nx
+        ball['pos'][1] -= overlap * ny
 
-            #file_name = 'output_{:04d}.mp3'.format(cpt)
-            #file_name = 'ball6_1.mp3'
+        if ball['size'] != ball_size_small:
 
-            #background_audio_player(index,file_name)
-            cpt = cpt + 1
+            print("bounce")
+            handle_bounce(outport, midi_track, bpm)
 
-            print(current_note_index)
-            play_notes_at_second(current_note_index)
-
-            current_note_index = current_note_index + 1
-            # trail_max_position = trail_max_position + 2
-            acceleration_factor = acceleration_factor + 0.08
-
-            if (bounce_factor < max_bounce_factor):
-                bounce_factor = bounce_factor + 0.5
-
-            # Update the color change timer and interpolation factor
-            color_change_timer += dt * 10
-            if color_change_timer >= color_change_duration:
-                color_change_timer -= color_change_duration
-                current_color_index = next_color_index
-                next_color_index = (current_color_index + 1) % len(rainbow_colors)
-            interpolation_factor = color_change_timer / color_change_duration
-
-            # Calculate the current color
-            current_color = rainbow_colors[current_color_index]
-            next_color = rainbow_colors[next_color_index]
-            circle_color = interpolate_color(current_color, next_color, interpolation_factor)
-
-            outer_circle_radius_increment = outer_circle_radius_increment + 20
-
-            if (general_opacity < 254):
-                general_opacity = general_opacity + 1
-
-        # Update bounce count
-        if(index == 0):
             bounce_count += 1
 
-    else:
-        # Update position if no collision
-        ball['pos'][0] = next_x
-        ball['pos'][1] = next_y
+            # Increase ball size with each bounce, not exceeding maximum size
+            if ball['size'] < max_ball_size:
+                ball['size'] = min(2 * (circle_radius) / 1.05, ball['size'] * 1.03)
 
-    # Apply gravity (if it makes sense for your simulation)
+        # Calculate the corrected collision point at the inner boundary
+        collision_angle = math.atan2(dy, dx)
+        adjusted_radius = circle_radius - circle_thickness
+
+        # Calculate the collision point based on the adjusted radius and collision angle
+        collision_point = (
+            circle_center_x + adjusted_radius * math.cos(collision_angle),
+            circle_center_y + adjusted_radius * math.sin(collision_angle)
+        )
+
+        color_collision_angle = math.atan2(dy, dx) * 180 / math.pi % 360
+        color_index = int(color_collision_angle // segment_angle)
+        collision_color = rainbow_colors[color_index]
+        # Append the collision point and circle color to 'lines'
+        lines.append((collision_point, collision_color))
+
+
     ball['speed'][1] += gravity
 
-    # Enforce the maximum speed limit
-    speed_magnitude = math.sqrt(ball['speed'][0]**2 + ball['speed'][1]**2)
-    if speed_magnitude > max_speed:
-        # Normalize the speed vector and multiply by max_speed
-        ball['speed'][0] = (ball['speed'][0] / speed_magnitude) * max_speed
-        ball['speed'][1] = (ball['speed'][1] / speed_magnitude) * max_speed
+    ball['speed'][0] = max(-max_speed, min(max_speed, ball['speed'][0]))
+    ball['speed'][1] = max(-max_speed, min(max_speed, ball['speed'][1]))
+
+    # Update the trail positions for visual effects
+    trail_positions[index].append((ball['pos'][0], ball['pos'][1], circle_color, ball['size'] / 2))
+    if len(trail_positions[index]) > 5:
+        trail_positions[index].pop(0)
 
 
-# Function to play MIDI notes at a specific second
-def play_notes_at_second(second):
-    ticks_per_second = midi_file.ticks_per_beat * 0.0005  # Assuming 120 BPM
 
-    # Calculate start and end ticks for the desired second
-    start_tick = ticks_per_second * second
-    end_tick = ticks_per_second * (second + 1)
-    current_tick = 0
+def play_next_note(outport, midi_track, current_note_index):
+    while current_note_index < len(midi_track):
+        msg = midi_track[current_note_index]
+        # Increment index immediately to avoid getting stuck on a message
+        current_note_index += 1
 
-    for msg in midi_file:
-        current_tick += msg.time
-        if start_tick <= current_tick < end_tick:
-            if msg.type == 'note_on':
-                midi_output.note_on(msg.note, msg.velocity, msg.channel)
-            elif msg.type == 'note_off':
-                midi_output.note_off(msg.note, msg.velocity, msg.channel)
-        elif current_tick >= end_tick:
-            break
+        if msg.type == 'note_on' and msg.velocity > 0:  # Check for playable 'note_on' message
+            outport.send(msg)
+            # Calculate the time until the corresponding 'note_off'
+            duration_ticks = 0
+            for next_msg in midi_track[current_note_index:]:  # Start from the current index
+                duration_ticks += next_msg.time
+                if (next_msg.type == 'note_off' and next_msg.note == msg.note) or \
+                   (next_msg.type == 'note_on' and next_msg.note == msg.note and next_msg.velocity == 0):
+                    break
 
-def lighten_color(color, amount=0.5):
-    """Lightens the given color by multiplying (1-luminosity) by the given amount."""
-    return tuple(min(255, int(c + (255 - c) * amount)) for c in color)
+            # Convert ticks to seconds and delay
+            duration_seconds = duration_ticks * seconds_per_tick
 
-def darken_color(color, amount=0.5):
-    """Darkens the given color by multiplying (1-luminosity) by the given amount."""
-    return tuple(max(0, int(c * (1 - amount))) for c in color)
+            # Send 'note_off' message
+            off_msg = mido.Message('note_off', channel=msg.channel, note=msg.note, velocity=64, time=0)
+            outport.send(off_msg)
 
-def interpolate_color(color_start, color_end, factor):
-    red = round(color_start[0] + (color_end[0] - color_start[0]) * factor)
-    green = round(color_start[1] + (color_end[1] - color_start[1]) * factor)
-    blue = round(color_start[2] + (color_end[2] - color_start[2]) * factor)
-    return (int(min(255, max(0, red))), int(min(255, max(0, green))), int(min(255, max(0, blue))))
+            return current_note_index  # Return the updated index after playing the note
 
-# Define the draw_text function
+    return current_note_index  # Return the index if the end of the track is reached without a 'note_on'
+
+
+
+def handle_bounce(outport, midi_track, bpm):
+    global current_note_index  # Tracks the current position in the MIDI track
+    current_note_index = play_next_note(outport, midi_track, current_note_index)
+
+# Assuming you have some track selected for this
+midi_track = midi_file.tracks[0]  # Select the appropriate track that contains the notes
+current_note_index = 0  # Initialize the note index
+
+
+# Function to render text onto the screen
 def draw_text(surface, text, position, font, color=(255, 255, 255)):
-    """Render text onto the screen."""
     text_surface = font.render(text, True, color)
     surface.blit(text_surface, position)
 
+def ensure_color_values(color):
+    """Ensure all color components are within the 0-255 range."""
+    return tuple(min(255, max(0, int(c))) for c in color)
 
+update_instruments()
 
-# Primary ball settings
-ball_size = 50
-ball_size_small = 49
-ball_pos = [circle_center[0], circle_center[1] - 50]
-ball_speed = [-0.01, 0]
-ball_color = (0, 0, 0)  # black
+def play_full_midi(midi_file, outport, bpm=130):
+    ticks_per_beat = midi_file.ticks_per_beat
+    seconds_per_tick = 60.0 / (bpm * ticks_per_beat)
 
-# Ball settings
-balls = [
-    {'pos': [circle_center_x+10, circle_center_y], 'speed': [20, 20], 'size': ball_size, 'color': (0, 255, 0)},  # Green ball
-    {'pos': [circle_center_x, circle_center_y+30], 'speed': [-20, 20], 'size': ball_size, 'color': (255, 0, 0)},  # Red ball
-    {'pos': [circle_center_x-10, circle_center_y], 'speed': [20, 20], 'size': ball_size, 'color': (255, 0, 0)},   # Red ball
-    {'pos': [circle_center_x, circle_center_y+50], 'speed': [-20, 20], 'size': ball_size, 'color': (255, 0, 0)}  # Red ball
-]
+    last_event_time = 0
+    start_time = time.time()
 
-# Trailing effect storage
+    try:
+        for track in midi_file.tracks:
+            for msg in track:
+                if not msg.is_meta:
+                    current_event_time = last_event_time + msg.time * seconds_per_tick
+                    while time.time() - start_time < current_event_time:
+                        time.sleep(0.001)  # Sleep briefly to prevent a tight loop
+                    outport.send(msg)
+                    last_event_time = current_event_time
+    except Exception as e:
+        print(f"Error during MIDI playback: {e}")
 
-trail_positions = [[] for _ in balls]
+    print("MIDI playback finished.")
 
-# Lines storage for dynamic drawing between inner circle and ball center
-lines = []
+# Function to start MIDI playback in a background thread
+def start_midi_playback():
+    threading.Thread(target=play_full_midi, args=(midi_file, outport)).start()
 
-# Clock to control the frame rate
-clock = pygame.time.Clock()
-
-color_change_duration = 1.0  # Duration in seconds to complete a color transition
-color_change_timer = 0.0  # Timer to track the color transition progress
-current_color_index = 0  # Start with the first color
-next_color_index = (current_color_index + 1) % len(rainbow_colors)
-interpolation_factor = 0.0  # Factor to interpolate between current and next color
-
-# Initialize the cooldown timer
-collision_cooldown = 0
-acceleration_factor = 1.2
-max_acceleration_factor = 3
-
-screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)
-FullScreen = True
-
-# 5 38 27
-inst = 5
-midi_output.set_instrument(56, 0)
-midi_output.set_instrument(58, 1)
-
-dtcount = 0
-done = 0
-done2 = 0
-ftime = 0
 # Game loop
 while True:
     dt = clock.tick(60) / 1000  # Delta time in seconds
@@ -364,17 +409,17 @@ while True:
 
     dtcount += dt
     # Inside the game loop, check for 100 bounces
-    if bounce_count == 20 and done == 0:
-        spawn_rainbow_balls()  # Spawn rainbow balls at 100 bounces
-        done = 1
+#    if bounce_count == 20 and done == 0:
+#       spawn_rainbow_balls()  # Spawn rainbow balls at 100 bounces
+#       done = 1
 
-    if bounce_count == 50 and done2 == 0:
-        spawn_rainbow_balls()  # Spawn rainbow balls at 100 bounces
-        done2 = 1
+#    if bounce_count == 50 and done2 == 0:
+#        spawn_rainbow_balls()  # Spawn rainbow balls at 100 bounces
+#        done2 = 1
 
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
-            midi_output.close()
+            outport.close()
             pygame.midi.quit()
             pygame.quit()
             sys.exit()
@@ -406,12 +451,12 @@ while True:
             outer_circle_radius_increment -= 1 * dt * decrement_speed
             decrement_speed = decrement_speed * 1.004
 
-    if(ftime >= 62):
-        for index, ball in enumerate(balls):
-            if(index == 0):
-                ball['color'] =(0, 255, 0)  # Adjust fade factor as needed
-            else:
-                ball['color'] = (255, 0, 0)  # Adjust fade factor as needed
+#    if(ftime >= 62):
+#        for index, ball in enumerate(balls):
+#            if(index == 0):
+#                ball['color'] =(0, 255, 0)  # Adjust fade factor as needed
+#            else:
+#                ball['color'] = (255, 0, 0)  # Adjust fade factor as needed
 
 
     # Create a transparent surface
@@ -420,13 +465,14 @@ while True:
     screen.fill(black)
 
 
-    # Apply the function to convert color values before usage
-    circle_color_with_transparency = ensure_color_values(circle_color + (general_opacity,))
 
-    transparent_surface.fill(circle_color_with_transparency)
+    # Apply the function to convert color values before usage
+    #circle_color_with_transparency = ensure_color_values(circle_color + (general_opacity,))
+
+    #transparent_surface.fill(circle_color_with_transparency)
 
     # Blit the transparent surface onto the screen
-    screen.blit(transparent_surface, (0, 0))
+    #screen.blit(transparent_surface, (0, 0))
 
     # Outer circle for expansion effect
     expanded_radius = int(circle_radius + outer_circle_radius_increment)
@@ -439,10 +485,10 @@ while True:
     pygame.gfxdraw.filled_circle(screen, int(circle_center[0]), int(circle_center[1]), circle_radius, lighter_circle_color)
     pygame.gfxdraw.filled_circle(screen, int(circle_center[0]), int(circle_center[1]), circle_radius - circle_thickness, black)
 
-    draw_text(screen, '@musique.ball', (circle_center_x-60, circle_center_y),
-              debug_font, (45,45,45))
+    draw_text(screen, '@musique.ball', (circle_center_x-50, circle_center_y),
+              debug_font, (150,150,150))
 
-    border_thickness = 2
+    border_thickness = 4
 
 
 
@@ -451,21 +497,28 @@ while True:
 
     for index, ball in enumerate(balls):
 
+        # When drawing lines from the list 'lines'
+        for collision_point, line_color in lines:
+            pygame.draw.line(screen, line_color, collision_point,
+                             (int(ball['pos'][0]), int(ball['pos'][1])), 1)
+
+
         trail = trail_positions[index]
 
         if trail:  # Ensure the sublist is not empty
             for position in reversed(trail):
                 pos_x, pos_y, trail_color, ball_size_s = position
-                # Now use pos_x and pos_y instead of modifying the ball['pos'] directly
-                pygame.gfxdraw.filled_circle(screen, int(pos_x), int(pos_y),
-                                             int(ball_size_s + border_thickness), (255, 255, 255))
-                pygame.gfxdraw.filled_circle(screen, int(pos_x), int(pos_y), int(ball_size_s), trail_color)
+                safe_draw_circle(screen, trail_color, int(pos_x), int(pos_y), int(ball_size_s + border_thickness))
 
-        # Draw the border circle with added border thickness
-        pygame.gfxdraw.filled_circle(screen, int(ball['pos'][0]), int(ball['pos'][1]), int(ball['size'] / 2 + border_thickness), border_color)
-        pygame.gfxdraw.filled_circle(screen, int(ball['pos'][0]), int(ball['pos'][1]), ball['size'] // 2, ball['color'])
+        # Adjust color to be brighter and more suitable for glowing
+        brighter_color = ensure_color_values(circle_color)
 
+        # Draw the border circle with added border thickness using the safe draw function
+        safe_draw_circle(screen, brighter_color, int(ball['pos'][0]), int(ball['pos'][1]),
+                         int(ball['size'] / 2 + border_thickness))
 
+        # Draw the inner circle using the safe draw function
+        safe_draw_circle(screen, (0, 0, 0), int(ball['pos'][0]), int(ball['pos'][1]), int(ball['size'] / 2))
 
     # Drawing rainbow balls in the game loop
     for ball in rainbow_balls:
@@ -473,7 +526,10 @@ while True:
                                      int(ball['size'] / 2 + border_thickness), border_color)
         pygame.gfxdraw.filled_circle(screen, int(ball['pos'][0]), int(ball['pos'][1]), ball['size'] // 2, ball['color'])
 
-    draw_text(screen, f'Rebonds: {bounce_count}', (circle_center_x-50, circle_center_y+280),
-              debug_font, (200,200,200))
+
+
+
+    draw_text(screen, f'Rebonds: {bounce_count}', (circle_center_x-40, circle_center_y+280),
+              debug_font2, (200,200,200))
 
     pygame.display.flip()
