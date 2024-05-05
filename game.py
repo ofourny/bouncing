@@ -77,7 +77,7 @@ damping_factor = initial_damping  # Initialize the damping variable at the start
 # Circle settings for graphics and collision
 circle_center_x, circle_center_y = screen_width / 2, screen_height / 2
 circle_center = [circle_center_x, circle_center_y]
-circle_radius = 200
+circle_radius = 300
 circle_thickness = 10
 outer_circle_radius_increment = 0
 
@@ -90,7 +90,7 @@ current_color_index = 0
 trail_current_color_index = 0
 circle_color = rainbow_colors[current_color_index]
 trail_color = rainbow_colors[trail_current_color_index]
-color_change_duration = 1.0  # Duration in seconds to complete a color transition
+color_change_duration = 2.0  # Duration in seconds to complete a color transition
 trail_color_change_duration = 1.0  # Duration in seconds to complete a color transition
 color_change_timer = 0.0  # Timer to track the color transition progress
 trail_color_change_timer = 0.0  # Timer to track the color transition progress
@@ -115,18 +115,51 @@ done2 = 0
 ftime = 0
 dtcount = 0
 cpt = 0
+vertex_shift = math.radians(1)  # Shift each vertex by 5 degrees upon being hit
 
-# Ball settings
+# Initial vertex angles for the equilateral triangle
+vertex_angles = [i * 2 * math.pi / 3 for i in range(3)]  # 0, 120, and 240 degrees
+
 balls = [
-    {'pos': [circle_center_x+10, circle_center_y], 'speed': [50, 400], 'size': ball_size, 'color': (0, 255, 0), 'type': 'main'},  # Green ball
+    {
+        'speed': [0, 0],
+        'size': ball_size,
+        'color': (255, 255, 255),
+        'type': 'main',
+        'pos': [
+            circle_center[0] + circle_radius * math.cos(vertex_angles[0]),
+            circle_center[1] + circle_radius * math.sin(vertex_angles[0])
+        ],
+        'target_index': 1
+    },
+    {
+        'speed': [0, 0],
+        'size': ball_size,
+        'color': (255, 255, 255),
+        'type': 'main',
+        'pos': [
+            circle_center[0] + circle_radius * math.cos(vertex_angles[1]),
+            circle_center[1] + circle_radius * math.sin(vertex_angles[1])
+        ],
+        'target_index': 2
+    },
+    {
+        'speed': [0, 0],
+        'size': ball_size,
+        'color': (255, 255, 255),
+        'type': 'main',
+        'pos': [
+            circle_center[0] + circle_radius * math.cos(vertex_angles[2]),
+            circle_center[1] + circle_radius * math.sin(vertex_angles[2])
+        ],
+        'target_index': 0
+    }
 ]
-
-
 # Global variable to store rainbow balls
 rainbow_balls = []
 frozen_balls = []
 lines = []
-trail_positions = [[] for _ in balls]
+trail_positions = []
 spark_trails = []  # Store ongoing spark trails
 
 # Assuming a BPM that you might want to dynamically adjust according to your MIDI file
@@ -298,113 +331,74 @@ def draw_balls(screen, balls):
 
 
 draw_circle_color = circle_color
+def change_color(dt):
+    global color_change_timer, next_color_index, rainbow_colors, current_color_index, circle_color
+
+    # Update the color change timer and interpolation factor
+    color_change_timer += dt * 10
+    if color_change_timer >= color_change_duration:
+        color_change_timer -= color_change_duration
+        current_color_index = next_color_index
+        next_color_index = (current_color_index + 1) % len(rainbow_colors)
+    interpolation_factor = color_change_timer / color_change_duration
+
+    # Calculate the current color
+    current_color = rainbow_colors[current_color_index]
+    next_color = rainbow_colors[next_color_index]
+    circle_color = interpolate_color(current_color, next_color, interpolation_factor)
+    circle_color = ensure_color_values(circle_color + (general_opacity,))
+
+
+ball_speed = 800  # pixels per second
 
 def update_ball(index, ball, dt):
-    global space, spark_trails, draw_circle_color, rainbow_colors, current_midi_tick, segment_length_ticks, outport, midi_file, bpm, ball_size, bounce_count, cpt, current_note_index, bounce_factor, acceleration_factor, max_bounce_factor, color_change_timer, trail_color, trail_color_change_timer, next_color_index, trail_next_color_index, outer_circle_radius_increment, general_opacity, trail_current_color_index, current_color_index, circle_color, trail_positions, trail_max_position
-    max_speed = 800  # Maximum speed limit for any ball
+    global circle_center, circle_radius, spark_trails, bounce_count, vertex_angles, vertex_shift,ball_speed, color_index, draw_circle_color
 
-    if ball['type'] == 'main':
-        # Update the color change timer and interpolation factor
-        color_change_timer += dt * 10
-        if color_change_timer >= color_change_duration:
-            color_change_timer -= color_change_duration
-            current_color_index = next_color_index
-            next_color_index = (current_color_index + 1) % len(rainbow_colors)
-        interpolation_factor = color_change_timer / color_change_duration
+    target_index = ball['target_index']
+    target_angle = vertex_angles[target_index]
+    target_x = circle_center[0] + circle_radius * math.cos(target_angle)
+    target_y = circle_center[1] + circle_radius * math.sin(target_angle)
 
-        # Calculate the current color
-        current_color = rainbow_colors[current_color_index]
-        next_color = rainbow_colors[next_color_index]
-        circle_color = interpolate_color(current_color, next_color, interpolation_factor)
-        circle_color = ensure_color_values(circle_color + (general_opacity,))
+    vector_x = target_x - ball['pos'][0]
+    vector_y = target_y - ball['pos'][1]
+    distance_to_target = math.sqrt(vector_x ** 2 + vector_y ** 2)
 
-    # Apply stronger gravity effect
-    ball['speed'][1] += gravity   # Increased gravity effect
+    # Move the ball towards the target
+    if distance_to_target > ball_speed * dt:
+        norm_factor = ball_speed * dt / distance_to_target
+        ball['pos'][0] += vector_x * norm_factor
+        ball['pos'][1] += vector_y * norm_factor
+    else:
 
-    # Calculate new position
-    new_x = ball['pos'][0] + ball['speed'][0] * dt
-    new_y = ball['pos'][1] + ball['speed'][1] * dt
-
-    # Distance from the center to new position
-    dx = new_x - circle_center_x
-    dy = new_y - circle_center_y
-    distance = math.sqrt(dx**2 + dy**2)
-
-    # Example usage:
-    shift_amount = 0.005  # Adjust this value to control the speed and direction of the color shift
-    shift_rainbow_colors(shift_amount)
-
-    # Check collision with the circle's boundary
-    if distance > circle_radius - ball['size'] / 2:
-
-        # Normalize direction vector
-        nx, ny = dx / distance, dy / distance
-
-        # Reflect the velocity vector
-        dot = ball['speed'][0] * nx + ball['speed'][1] * ny
-        ball['speed'][0] -= 2 * dot * nx
-        ball['speed'][1] -= 2 * dot * ny
-
-        # Apply powerful bounce effect
-        ball['speed'][0] *= bounce_factor * random.uniform(1.1, 1.3)
-        ball['speed'][1] *= bounce_factor * random.uniform(1.1, 1.3)
-
-        # Reposition ball on the boundary
-        overlap = distance + ball['size'] / 2 - circle_radius
-        ball['pos'][0] -= overlap * nx
-        ball['pos'][1] -= overlap * ny
-
-        if ball['type'] == 'main':
+        if(index == 0):
             handle_bounce(outport, midi_track, bpm)
-
-            # Increase ball size with each bounce, not exceeding maximum size
-            if ball['size'] < max_ball_size:
-                ball['size'] = min(2 * (circle_radius) / 1.03, ball['size'] * 1.03)
-
-            # Increase bounce count
             bounce_count += 1
 
-            new_ball = add_ball(space, circle_color, 0.5)
-            rainbow_balls.append(new_ball)  # Add the new ball to the tracking list
+            if(ball_speed < 2000):
+                ball_speed = ball_speed * 1.05
 
-            outer_circle_radius_increment = outer_circle_radius_increment + 20
+            initiate_sparks_on_collision(spark_trails, [target_x, target_y])
 
-            # Calculate the corrected collision point at the inner boundary
-            collision_angle = math.atan2(dy, dx)
-            adjusted_radius = circle_radius - circle_thickness
-
-            # Calculate the collision point based on the adjusted radius and collision angle
-            collision_point = (
-                circle_center_x + adjusted_radius * math.cos(collision_angle),
-                circle_center_y + adjusted_radius * math.sin(collision_angle)
-            )
-            initiate_sparks_on_collision(spark_trails, collision_point)
-
-            color_collision_angle = math.atan2(dy, dx) * 180 / math.pi % 360
+            color_collision_angle = math.atan2(vector_x, vector_y) * 180 / math.pi % 360
             color_index = int(color_collision_angle // segment_angle)
-
-            # Append the collision point and circle color to 'lines'
-            lines.append((collision_point, color_index))
-
             draw_circle_color = circle_color
+            change_color(dt)
 
-    else:
-        # Update position normally
-        ball['pos'][0] = new_x
-        ball['pos'][1] = new_y
+        # Ball reaches the vertex, update position to the vertex and shift the vertex
+        ball['pos'][0], ball['pos'][1] = target_x, target_y
+        ball['target_index'] = (target_index + 1) % 3
 
-    # Limit speed to prevent excessive speeds
-    speed = math.sqrt(ball['speed'][0]**2 + ball['speed'][1]**2)
-    if speed > max_speed:
-        ball['speed'][0] = (ball['speed'][0] / speed) * max_speed
-        ball['speed'][1] = (ball['speed'][1] / speed) * max_speed
+        # Shift the vertex angle slightly
+        vertex_angles[target_index] += vertex_shift
 
-    if ball['type'] == 'main':
 
-        # Update trail positions for visual effects
-        trail_positions[index].append((ball['pos'][0], ball['pos'][1], circle_color, ball['size'] / 2))
-        if len(trail_positions[index]) > 20:
-            trail_positions[index].pop(0)
+def interpolate_trail_positions(start_pos, end_pos, steps):
+    x_step = (end_pos[0] - start_pos[0]) / steps
+    y_step = (end_pos[1] - start_pos[1]) / steps
+    return [(start_pos[0] + x_step * i, start_pos[1] + y_step * i) for i in range(steps)]
+
+
+
 
 def initiate_sparks_on_collision(spark_trails, collision_point):
     number_of_sparks = 10  # Number of sparks to generate
@@ -622,11 +616,15 @@ add_walls(space, screen_width, screen_height)
 
 #big_ball = add_main_ball(space, circle_color, 1.2)
 
+# Create a persistent surface
+persistent_surface = pygame.Surface(screen.get_size(), pygame.SRCALPHA)
+persistent_surface.set_alpha(255)  # Optional: set transparency for the persistent surface
+
 
 # Game loop
 while True:
 
-    dt = clock.tick(60) / 1000  # Delta time in seconds
+    dt = clock.tick(120) / 1000  # Delta time in seconds
 
     ftime = ftime + dt
     dtcount += dt
@@ -664,32 +662,12 @@ while True:
     for index, ball in enumerate(balls):
         update_ball(index, ball, dt)
 
+
     if outer_circle_radius_increment > 0:
         outer_circle_radius_increment -= 1 * dt * decrement_speed
         decrement_speed = decrement_speed * 1.004
 
-#    if(ftime >= 62):
-#        for index, ball in enumerate(balls):
-#            if(index == 0):
-#                ball['color'] =(0, 255, 0)  # Adjust fade factor as needed
-#            else:
-#                ball['color'] = (255, 0, 0)  # Adjust fade factor as needed
-
-
-    # Create a transparent surface
-    transparent_surface = pygame.Surface((screen_width, screen_height), pygame.SRCALPHA)
-
     screen.fill(black)
-
-
-
-    # Apply the function to convert color values before usage
-    #circle_color_with_transparency = ensure_color_values(circle_color + (general_opacity,))
-
-    #transparent_surface.fill(circle_color_with_transparency)
-
-    # Blit the transparent surface onto the screen
-    #screen.blit(transparent_surface, (0, 0))
 
     # Outer circle for expansion effect
     expanded_radius = int(circle_radius + outer_circle_radius_increment)
@@ -711,44 +689,17 @@ while True:
 
     draw_sparks(screen, spark_trails, circle_color)
 
-
-    draw_balls(screen, rainbow_balls)  # Draw balls with their colors
-
     # Ball with border
-    border_color = (255,255,255)
     for index, ball in enumerate(balls):
-
-        # When drawing lines from the list 'lines'
-        for collision_point, color_index in lines:
-            collision_color = rainbow_colors_shifted[color_index]
-            pygame.draw.line(screen, collision_color, collision_point, (int(ball['pos'][0]), int(ball['pos'][1])), 1)
-
-            # Calculate trajectory towards the center of the screen
-            center_x, center_y = screen.get_width() / 2, screen.get_height() / 2
-            trajectory_to_center = (center_x - collision_point[0], center_y - collision_point[1])
-
-        if(ball['type'] == 'main'):
-            trail = trail_positions[index]
-
-            if trail:  # Ensure the sublist is not empty
-                for position in reversed(trail):
-                    pos_x, pos_y, circle_color, ball_size_s = position
-                    safe_draw_circle(screen, circle_color, int(pos_x), int(pos_y), int(ball_size_s + border_thickness))
-
-        # Adjust color to be brighter and more suitable for glowing
-        brighter_color = ensure_color_values(circle_color)
-
-        # Draw the border circle with added border thickness using the safe draw function
-        #safe_draw_circle(screen, brighter_color, int(ball['pos'][0]), int(ball['pos'][1]), int(ball['size'] / 2 + border_thickness))
-
         # Draw the inner circle using the safe draw function
-        if (ball['type'] == 'main'):
-            safe_draw_circle(screen, (0, 0, 0), int(ball['pos'][0]), int(ball['pos'][1]), int(ball['size'] / 2))
-        else:
-            safe_draw_circle(screen, trail_color, int(ball['pos'][0]), int(ball['pos'][1]), int(ball['size'] / 2))
+        safe_draw_circle(persistent_surface, circle_color, int(ball['pos'][0]), int(ball['pos'][1]), int(ball['size'] / 2) + 2)
+        safe_draw_circle(persistent_surface, (0, 0, 0), int(ball['pos'][0]), int(ball['pos'][1]), int(ball['size'] / 2))
+
+    screen.blit(persistent_surface, (0, 0))
 
 
-
-    #draw_text(screen, f'Rebonds: {bounce_count}', (circle_center_x-50, circle_center_y+280), debug_font2, (200,200,200))
+    for index, ball in enumerate(balls):
+        # Draw the inner circle using the safe draw function
+        safe_draw_circle(screen, (255,255,255), int(ball['pos'][0]), int(ball['pos'][1]), int(ball['size'] / 2))
 
     pygame.display.flip()
