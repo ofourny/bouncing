@@ -1,4 +1,6 @@
-# Helper functions for color manipulation
+
+
+
 def lighten_color(color, amount=0.5):
     """Lightens the given color by multiplying (1-luminosity) by the given amount."""
     return tuple(min(255, int(c + (255 - c) * amount)) for c in color)
@@ -37,3 +39,4 @@ def shift_colors(rainbow_colors, shift_factor):
         interpolated_color = interpolate_color(current_color, next_color, shift_factor)
         new_colors.append(interpolated_color)
     return new_colors
+

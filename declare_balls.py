@@ -35,3 +35,14 @@ balls = [
         'target_index': 0
     }
 ]
+
+#balls for follow the ball
+
+# Ball settings
+balls = [
+    {'pos': [circle_center_x, circle_center_y+30], 'speed': [-20, 20], 'size': ball_size, 'color': (255, 0, 0), 'original_color': (255, 0, 0)},  # Red ball
+    {'pos': [circle_center_x + 10, circle_center_y], 'speed': [20, 20], 'size': ball_size, 'color': (0, 255, 0),
+     'original_color': (0, 255, 0)},  # Green ball
+    {'pos': [circle_center_x-10, circle_center_y], 'speed': [20, 20], 'size': ball_size, 'color': (255, 0, 0), 'original_color': (255, 0, 0)},   # Red ball
+    {'pos': [circle_center_x, circle_center_y+50], 'speed': [-20, 20], 'size': ball_size, 'color': (255, 0, 0), 'original_color': (255, 0, 0)}  # Red ball
+]
